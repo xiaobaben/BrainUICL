@@ -332,7 +332,7 @@ def incremental_trainer(blocks, teacher_blocks, args, new_task_loader, new_task_
                                  weight_decay=args.weight_decay)
     model_param = ModelConfig(args.dataset)
     align_feature = []
-    for epoch in range(args.incremental_epoch+1):
+    for epoch in range(args.incremental_epoch):
         blocks[0].train()
         blocks[1].train()
         blocks[2].train()
