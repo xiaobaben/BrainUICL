@@ -238,3 +238,78 @@ class BufferPseudoLabelFinetune(object):
         self.optimizer.step()
 
         return loss.item(), (self.feature_extractor, self.feature_encoder, self.classifier), eeg_eog_feature_train
+
+class BufferPseudoLabelFinetune4_BCI2000(object):
+    def __init__(self, blocks, teacher_blocks, args):
+        super(BufferPseudoLabelFinetune4_BCI2000, self).__init__()
+
+        self.args = args
+        self.device = self.arg.device
+        self.feature_extractor = blocks[0].to(self.device)
+        self.feature_encoder = blocks[1].to(self.device)
+        self.classifier = blocks[2].to(self.device)
+
+        self.feature_extractor_t = teacher_blocks[0].to(self.device)
+        self.feature_encoder_t = teacher_blocks[1].to(self.device)
+        self.classifier_t = teacher_blocks[2].to(self.device)
+
+        self.model_param = ModelConfig(self.args.dataset)
+
+        self.softmax = nn.Softmax(dim=1)
+        self.confidence_level = 0.9
+        self.optimizer = torch.optim.Adam([{"params": list(self.feature_extractor.parameters())},
+                                           {"params": list(self.feature_encoder.parameters())},
+                                           {"params": list(self.classifier.parameters())}],
+                                          lr=self.args.incremental_lr, betas=(self.args.beta[0], self.args.beta[1]),
+                                          weight_decay=self.args.weight_decay)
+
+        self.cross_entropy = nn.CrossEntropyLoss()
+    def update(self, x, label):
+        # ====== Data =====================
+        batch = x.shape[0]
+        epoch_size = self.model_param.EpochLength
+
+        x_new = x[:, :self.model_param.BCICn, :]
+        x_train = x[:, self.model_param.BCICn:, :]
+        # print(label.shape)
+        label_new = label[:, :1]
+        label_train = label[:, 1:]
+
+        x = torch.concat((x_new, x_train), dim=0)
+
+        eeg_eog_feature = self.feature_extractor(x)  
+        eeg_eog_feature = self.feature_encoder(eeg_eog_feature)
+
+        eeg_eog_feature_train = eeg_eog_feature[batch:, :, :]
+        eeg_eog_feature_new = eeg_eog_feature[:batch, :, :]
+
+        pred_train = self.classifier(eeg_eog_feature_train)
+        self.optimizer.zero_grad()
+
+        with torch.no_grad():
+            ff = self.feature_extractor_t(x_new)
+            ff = self.feature_encoder_t(ff)
+            mean_t_pred = self.classifier_t(ff)
+            mean_t_pred = mean_t_pred.view(-1, 4)
+ 
+            mean_t_pred = self.softmax(mean_t_pred)  # 640, 5
+            pred_prob = mean_t_pred.max(1, keepdim=True)[0].squeeze()
+            target_pseudo_labels = mean_t_pred.max(1, keepdim=True)[1].squeeze()
+
+        pred_target = self.classifier(eeg_eog_feature_new)
+
+        pred_target = pred_target.view(-1, 4)
+
+        confident_pred = pred_target[pred_prob > self.confidence_level]
+        confident_labels = target_pseudo_labels[pred_prob > self.confidence_level]
+        loss_new = self.cross_entropy(confident_pred, confident_labels.long())
+        label_train = label_train.view(-1)
+        loss_old = self.cross_entropy(pred_train, label_train.long())
+
+        loss = self.args.alpha*loss_new + (1-self.args.alpha)*loss_old
+        loss.backward()
+        self.optimizer.step()
+
+
+        return loss.item(), (self.feature_extractor, self.feature_encoder, self.classifier), eeg_eog_feature_train
+
