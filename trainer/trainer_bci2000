@@ -76,16 +76,15 @@ def get_new_task_loader(args, new_task_idx, is_buffer, shuffle):
     return new_task_loader
 
 
-def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_idx, args):
-    EPOCH_NUMBER = args.KL_Epoch
+def trainer_bci2000(old_task_loader, new_task_idx, args, performance):
+    cross_epoch = args.cross_epoch
     num = 1
-    PATH = 'PATH'
+    print(new_task_idx)
     for new_task_id in new_task_idx:
         print("New Task Id", new_task_id)
 
-        if num >= args.train_num:
+       if num >= args.train_num:
             args.alpha = np.power(0.1, np.log10(num/args.train_num)+2)
-       
 
         new_task_loader = get_new_task_loader(args, new_task_id, False, True)
 
@@ -93,8 +92,10 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         mi_classifier = MIMLP_BCI2000(args).float()
         feature_encoder = TransformerEncoder_BCI2000(args).float()
 
-        if not os.path.exists(PATH):
-            os.makedirs(PATH)
+        if not os.path.exists(f"model_parameter/{args.dataset}/"
+                              f"EpochNum_{cross_epoch}_{args.algorithm}/individual_{num}"):
+            os.makedirs(f"model_parameter/{args.dataset}/"
+                        f"EpochNum_{cross_epoch}_{args.algorithm}/individual_{num}")
 
         if num == 1:
             """
@@ -106,17 +107,17 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
                 torch.load(PATH))
             mi_classifier.load_state_dict(
                 torch.load(PATH))
-            old_task_ans = evaluator((feature_extractor, feature_encoder, mi_classifier), old_task_loader, args)
+            old_task_ans = evaluator((feature_extractor, feature_encoder, sleep_classifier), old_task_loader, args)
 
             old_task_evaluator = Evaluator(old_task_ans[0], old_task_ans[1])
             old_task_acc, old_task_mf1 = old_task_evaluator.metric_acc(), old_task_evaluator.metric_mf1()
-            args.old_task_performance['ACC'].append(old_task_acc)
-            args.old_task_performance['MF1'].append(old_task_mf1)
+            performance['stability']['ACC'].append(old_task_acc)
+            performance['stability']['MF1'].append(old_task_mf1)
 
-            old_task_aaa = compute_aaa(args.old_task_performance['ACC'])
-            old_task_forget = compute_forget(args.old_task_performance['ACC'])
-            args.old_task_performance['AAA'].append(old_task_aaa)
-            args.old_task_performance['FR'].append(old_task_forget)
+            old_task_aaa = compute_aaa(performance['stability']['ACC'])
+            old_task_forget = compute_forget(performance['stability']['ACC'])
+            performance['stability']['AAA'].append(old_task_aaa)
+            performance['stability']['FR'].append(old_task_forget)
 
         else:
             """
@@ -129,7 +130,8 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         cur_blocks = (feature_extractor, feature_encoder, mi_classifier)
         teacher_blocks = copy.deepcopy(cur_blocks)
         last_blocks = copy.deepcopy(cur_blocks)
-        tmp_blocks, tmp_blocks_teacher = incremental_trainer(cur_blocks, teacher_blocks, args, new_task_loader, new_task_id, num)
+        tmp_blocks, tmp_blocks_teacher = incremental_trainer(cur_blocks, teacher_blocks,
+                                                             args, new_task_loader, new_task_id, num)
 
         """Store Newest Model"""
         state_f = tmp_blocks[0].state_dict()
@@ -143,9 +145,16 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         state_mi = tmp_blocks[2].state_dict()
         for key in state_mi.keys():
             state_mi[key] = state_mi[key].to(torch.device("cpu"))
-        torch.save(state_f, PATH)
-        torch.save(state_encoder, PATH)
-        torch.save(state_mi, PATH)
+        torch.save(state_f,
+                   f"model_parameter/{args.dataset}/EpochNum_{cross_epoch}_{args.algorithm}"
+                   f"/individual_{num}/feature_extractor_parameter_{args.seed}.pkl")
+        torch.save(state_encoder,
+                   f"model_parameter/{args.dataset}/EpochNum_{cross_epoch}_{args.algorithm}"
+                   f"/individual_{num}/feature_encoder_parameter_{args.seed}.pkl")
+        torch.save(state_sleep,
+                   f"model_parameter/{args.dataset}/EpochNum_{cross_epoch}_{args.algorithm}"
+                   f"/individual_{num}/sleep_classifier_parameter_{args.seed}.pkl")
+
 
         """Initial Model"""
         feature_extractor_initial = FeatureExtractor_BCI2000(args).float()
@@ -153,11 +162,14 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         feature_encoder_initial = TransformerEncoder_BCI2000(args).float()
 
         feature_extractor_initial.load_state_dict(
-            torch.load(PATH))
+            torch.load(
+                f"model_parameter/{args.dataset}/Pretrain/feature_extractor_parameter_{args.seed}.pkl"))
         feature_encoder_initial.load_state_dict(
-            torch.load(PATH))
-        mi_classifier_initial.load_state_dict(
-            torch.load(PATH))
+            torch.load(
+                f"model_parameter/{args.dataset}/Pretrain/feature_encoder_parameter_{args.seed}.pkl"))
+        sleep_classifier_initial.load_state_dict(
+            torch.load(
+                f"model_parameter/{args.dataset}/Pretrain/sleep_classifier_parameter_{args.seed}.pkl"))
 
         """Metric"""
         new_task_initial_ans = evaluator((feature_extractor_initial,
@@ -176,14 +188,14 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         new_task_before_acc, new_task_before_mf1 = new_before_evaluator.metric_acc(), new_before_evaluator.metric_mf1()
         new_task_after_acc, new_task_after_mf1 = new_after_evaluator.metric_acc(), new_after_evaluator.metric_mf1()
 
-        args.new_task_performance[new_task_id]['ACC'] = [new_task_initial_acc, new_task_before_acc, new_task_after_acc]
-        args.new_task_performance[new_task_id]['MF1'] = [new_task_initial_mf1, new_task_before_mf1, new_task_after_mf1]
+        performance['plasticity'][new_task_id]['ACC'] = [new_task_initial_acc, new_task_before_acc, new_task_after_acc]
+        performance['plasticity'][new_task_id]['MF1'] = [new_task_initial_mf1, new_task_before_mf1, new_task_after_mf1]
 
-        print(f"=========New Task {new_task_id}=========")
-        print(" ACC Initial                    ", args.new_task_performance[new_task_id]['ACC'][0], "\n",
-              "ACC Before                    ", args.new_task_performance[new_task_id]['ACC'][1], "\n",
+        print(f"=========Incremental Individual {new_task_id}=========")
+        print(" ACC Initial                    ", performance['plasticity'][new_task_id]['ACC'][0], "\n",
+              "ACC Before                    ", performance['plasticity'][new_task_id]['ACC'][1], "\n",
               "ACC After Contrastive Learning ", new_after_teacher_evaluator.metric_acc(), "\n",
-              "ACC After Joint Training       ", args.new_task_performance[new_task_id]['ACC'][2], "\n")
+              "ACC After Joint Training       ", performance['plasticity'][new_task_id]['ACC'][2], "\n")
 
         old_task_ans = evaluator(tmp_blocks, old_task_loader, args)
         old_task_teacher_ans = evaluator(tmp_blocks_teacher, old_task_loader, args)
@@ -193,40 +205,38 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
 
         old_task_acc = old_task_evaluator.metric_acc()
         old_task_mf1 = old_task_evaluator.metric_mf1()
-        args.old_task_performance['ACC'].append(old_task_acc)
-        args.old_task_performance['MF1'].append(old_task_mf1)
+        performance['stability']['ACC'].append(old_task_acc)
+        performance['stability']['MF1'].append(old_task_mf1)
 
-        old_task_aaa = compute_aaa(args.old_task_performance['ACC'])
-        old_task_forget = compute_forget(args.old_task_performance['ACC'])
-        args.old_task_performance['AAA'].append(old_task_aaa)
-        args.old_task_performance['FR'].append(old_task_forget)
+        old_task_aaa = compute_aaa(performance['stability']['ACC'])
+        old_task_forget = compute_forget(performance['stability']['ACC'])
+        performance['stability']['AAA'].append(old_task_aaa)
+        performance['stability']['FR'].append(old_task_forget)
 
-        print(args["old_task_performance"])
-        print("=========Old Task=========")
-        if num ==1 :
-            print(" ACC Before                    ", args.old_task_performance['ACC'][0], "\n",
+        print(performance["stability"])
+        print("=========Model Generalization Ability=========")
+        if num == 1:
+            print(" ACC Before                    ", performance['stability']['ACC'][0], "\n",
                   "ACC After Contrastive Learning ", old_task_evaluator_teacher.metric_acc(), "\n",
-                  "ACC After Joint Training       ", args.old_task_performance['ACC'][-1], "\n",
-                  "MF1 Before                     ", args.old_task_performance['MF1'][0], "\n",
+                  "ACC After Joint Training       ", performance['stability']['ACC'][-1], "\n",
+                  "MF1 Before                     ", performance['stability']['MF1'][0], "\n",
                   "MF1 After Contrastive Learning ", old_task_evaluator_teacher.metric_mf1(), "\n",
-                  "MF1 After Joint Training       ", args.old_task_performance['MF1'][-1], "\n")
+                  "MF1 After Joint Training       ", performance['stability']['MF1'][-1], "\n")
         else:
-            print(" ACC Before                    ", args.old_task_performance['ACC'][-2], "\n",
+            print(" ACC Before                    ", performance['stability']['ACC'][-2], "\n",
                   "ACC After Contrastive Learning ", old_task_evaluator_teacher.metric_acc(), "\n",
-                  "ACC After Joint Training       ", args.old_task_performance['ACC'][-1], "\n",
-                  "MF1 Before                     ", args.old_task_performance['MF1'][-2], "\n",
+                  "ACC After Joint Training       ", performance['stability']['ACC'][-1], "\n",
+                  "MF1 Before                     ", performance['stability']['MF1'][-2], "\n",
                   "MF1 After Contrastive Learning ", old_task_evaluator_teacher.metric_mf1(), "\n",
-                  "MF1 After Joint Training       ", args.old_task_performance['MF1'][-1], "\n")
+                  "MF1 After Joint Training       ", performance['stability']['MF1'][-1], "\n")
 
-        """If needs merge new individual's data to the buffer"""
-        if args.buffer_merge:
-            buffer_single_merge(args, new_task_id, num, tmp_blocks)
+        buffer_single_merge(args, new_task_id, num, tmp_blocks)
         print("Buffer_Length", len(args.train_path[0]), len(args.train_path[1]))
         num += 1
 
 
 def buffer_single_merge(args, new_task_id, num, tmp_blocks):
-    EPOCH_NUMBER = args['KL_Epoch']
+    EPOCH_NUMBER = args.cross_epoch
     new_task_path = [[], []]
     file_path = args['filepath'] + f"/{new_task_id}/data"
     label_path = args['filepath'] + f"/{new_task_id}/label"
@@ -236,67 +246,45 @@ def buffer_single_merge(args, new_task_id, num, tmp_blocks):
         new_task_path[1].append(label_path + f"/{idx}.npy")
         idx += 1
     new_task_builder = Builder(new_task_path, args).Dataset
-    new_task_loader = DataLoader(dataset=new_task_builder, batch_size=args["batch"], shuffle=False, num_workers=4)
+    new_task_loader = DataLoader(dataset=new_task_builder, batch_size=args.batch, shuffle=False, num_workers=4)
     new_task_after_ans = evaluator(tmp_blocks, new_task_loader, args)
 
     new_task_pred = new_task_after_ans[1]
     new_task_pseudo_label = np.array(new_task_pred)
-    seq_num = new_task_pseudo_label.shape[0] // 20
-    save_path = "PATH"
+
+    save_path = f"model_parameter/{args.dataset}/" \
+                f"EpochNum_{cross_epoch}_{args.algorithm}/individual_{num}/label"
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    """直接更新新个体所有数据进BUFFER池"""
-    if not args['DCB']:
-        confidence_level = 0
-        new_task_out = new_task_after_ans[2]
-        mean_t_pred = torch.softmax(new_task_out, dim=1)
-        pred_prob = mean_t_pred.max(1, keepdim=True)[0].squeeze()
-        pred_label = mean_t_pred.max(1, keepdim=True)[1].squeeze()
 
-        pred_prob = pred_prob.cpu().numpy()
-        pred_label = pred_label.cpu().numpy()
-        for bh in range(pred_prob.shape[0]):
-            if pred_prob[bh] >= confidence_level:
-                confident_label = pred_label[bh].reshape(-1, 1)
-                confident_label = np.squeeze(confident_label)
-                save_label_path = save_path + f"/{bh}.npy"
-                np.save(save_label_path, confident_label)
-                args["train_path"][1].append(save_label_path)
-                args["train_path"][0].append(new_task_path[0][bh])
-        """只更新新个体每个序列样本中有N个Epoch的预测概率大于阈值的个体"""
-    else:
-        confidence_level = 0.9
-        new_task_out = new_task_after_ans[2]
-        mean_t_pred = torch.softmax(new_task_out, dim=1)
-        pred_prob = mean_t_pred.max(1, keepdim=True)[0].squeeze()
-        pred_label = mean_t_pred.max(1, keepdim=True)[1].squeeze()
+    
+    confidence_level = 0.9
+    new_task_out = new_task_after_ans[2]
+    mean_t_pred = torch.softmax(new_task_out, dim=1)
+    pred_prob = mean_t_pred.max(1, keepdim=True)[0].squeeze()
+    pred_label = mean_t_pred.max(1, keepdim=True)[1].squeeze()
 
-        pred_prob = pred_prob.cpu().numpy()
-        pred_label = pred_label.cpu().numpy()
-        for bh in range(pred_prob.shape[0]):
-            if pred_prob[bh] >= confidence_level:
-                confident_label = pred_label[bh].reshape(-1, 1)
-                confident_label = np.squeeze(confident_label)
-                save_label_path = save_path + f"/{bh}.npy"
-                np.save(save_label_path, confident_label)
-                args["train_path"][1].append(save_label_path)
-                args["train_path"][0].append(new_task_path[0][bh])
+    pred_prob = pred_prob.cpu().numpy()
+    pred_label = pred_label.cpu().numpy()
+    for bh in range(pred_prob.shape[0]):
+        if pred_prob[bh] >= confidence_level:
+            confident_label = pred_label[bh].reshape(-1, 1)
+            confident_label = np.squeeze(confident_label)
+            save_label_path = save_path + f"/{bh}.npy"
+            np.save(save_label_path, confident_label)
+            args.train_path[1].append(save_label_path)
+            args.train_path[0].append(new_task_path[0][bh])
 
 
 
 def incremental_trainer(blocks, teacher_blocks, args, new_task_loader, new_task_id, num):
-    EPOCH_NUMBER = args['KL_Epoch']
-    """ Confirm Contrastive Method"""
-    if args['algorithm'] == 'cpc':
-        contrastive_algorithm = CPC_BCI2000(teacher_blocks, args)
-    elif args['algorithm'] == 'simsiam':
-        contrastive_algorithm = SimSiam(teacher_blocks, args)
-    elif args['algorithm'] == 'simclr':
-        contrastive_algorithm = SimCLR(teacher_blocks, args)
+    cross_epoch = args.cross_epoch
+    if args.algorithm == 'cpc':
+        contrastive_algorithm = CPC(teacher_blocks, args)
     else:
         contrastive_algorithm = None
 
-    device = args["device"]
+    device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
     tmp_blocks = None
 
     blocks[0].to(device)
@@ -311,7 +299,7 @@ def incremental_trainer(blocks, teacher_blocks, args, new_task_loader, new_task_
     Firstly, train teacher model using contrastive method to obtain confident pseudo-label
     """
 
-    for epoch in range(1, args["ssl_epoch"] + 1):
+    for epoch in range(1, args.ssl_epoch + 1):
         teacher_blocks[0].train()
         teacher_blocks[1].train()
         teacher_blocks[2].train()
@@ -324,25 +312,17 @@ def incremental_trainer(blocks, teacher_blocks, args, new_task_loader, new_task_
             epoch_loss.append(loss)
         print(f"New Task ID {int(num)}  Contrastive Epoch {epoch} Loss {np.mean(epoch_loss)}")
 
-    """
-    Secondly, using pseudo-label and train loader for joint-training.
-    """
 
-    """
-    BufferPseudoLabelFinetune:  Finetune Method Buffer and New data both use Pseudo label for CrossEntropy
-    BufferPseudoLabelFinetune2: Finetune Method Buffer use True label and New data use Pseudo label for CrossEntropy
-    """
-
-    algorithm = BufferPseudoLabelFinetune4_BCI2000(blocks, tmp_blocks_teacher, args)  # Buffer New Both True Encoder和Extractor层NEWOLD合并输入
+    algorithm = BufferPseudoLabelFinetune4_BCI2000(blocks, tmp_blocks_teacher, args)  
     shuffle = True
     buffer_loader = get_new_task_loader(args, new_task_id, True, shuffle)
-    print(f"New Task ID {int(num)}  Alpha={args['alpha']}")
+    print(f"New Task ID {int(num)}  Alpha={args.alpha}")
     optimizer = torch.optim.Adam([{"params": list(blocks[0].parameters())},
                                   {"params": list(blocks[1].parameters())}],
-                                    lr=args["incremental_lr"],
-                                    betas=(args['beta'][0], args['beta'][1]),
-                                    weight_decay=args['weight_decay'])
-    for epoch in range(1, args["incremental_epoch"] + 1):
+                                    lr=args.incremental_lr,
+                                    betas=(args.beta[0], args.beta[1]),
+                                    weight_decay=args.weight_decay)
+    for epoch in range(1, args.incremental_epoch + 1):
         blocks[0].train()
         blocks[1].train()
         blocks[2].train()
@@ -353,28 +333,32 @@ def incremental_trainer(blocks, teacher_blocks, args, new_task_loader, new_task_
 
         epoch_loss = []
         kl_loss = []
+       if epoch % cross_epoch == 0:
+            align_feature.append([])
+
         for batch_idx, data in enumerate(buffer_loader):
 
             x, label = data[0].to(device), data[1].to(device)
             loss, tmp_blocks, feature_before = algorithm.update(x, label)
+            if epoch % cross_epoch == 0:
+                align_feature[-1].append(feature_before)
             epoch_loss.append(loss)
-            if args['CEA']:
-                if epoch % EPOCH_NUMBER == 0:
 
-                    x_train = x[:, 64:, :]
+            if epoch % cross_epoch == 0 and epoch != 0:
 
-                    feature_latter = blocks[0](x_train)
-                    feature_latter = blocks[1](feature_latter)
+                x_train = x[:, 64:, :]
 
-                    optimizer.zero_grad()
+                feature_latter = blocks[0](x_train)
+                feature_latter = blocks[1](feature_latter)
 
-                    z1 = torch.nn.functional.log_softmax(feature_latter, dim=-1)
-                    z2 = F.softmax(feature_before.detach(), dim=-1)
-                    loss_clr_new = F.kl_div(z1, z2, reduction='batchmean')
-                    loss_clr_new.backward()
-                    optimizer.step()
-                    kl_loss.append(loss_clr_new.item())
-        print(f"New Task ID {int(num)}  Joint Fine-tuning Epoch {epoch} Loss {np.mean(epoch_loss)}")
+                optimizer.zero_grad()
 
+                z1 = torch.nn.functional.log_softmax(feature_latter, dim=-1)
+                z2 = F.softmax(align_feature[-2][batch_idx].detach(), dim=-1)
+                loss_clr_new = F.kl_div(z1, z2, reduction='batchmean')
+                loss_clr_new.backward()
+                optimizer.step()
+                kl_loss.append(loss_clr_new.item())
+
+        print(f"Incremental Individual ID {int(num)}  Joint Fine-tuning Epoch {epoch+1} Loss {np.mean(epoch_loss)}")
     return tmp_blocks, tmp_blocks_teacher
-
