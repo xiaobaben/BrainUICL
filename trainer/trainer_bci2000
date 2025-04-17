@@ -82,24 +82,15 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
     PATH = 'PATH'
     for new_task_id in new_task_idx:
         print("New Task Id", new_task_id)
-        if args.alpha_type == 1:
-            if num >= args['train_num']:
-                args['alpha'] = np.power(0.1, np.log10(num/args['train_num'])+2)
-        elif args['alpha_type'] == 2:
-            if num >= args['train_num']:
-                args['alpha'] = np.power(0.1, np.log10(num / args['train_num']) + 2)
-            else:
-                args['alpha'] = 0.1*np.power(0.1, num / args['train_num'])
-        elif args['alpha_type'] == 3:
-            if num >= args['train_num'] // 2:
-                args['alpha'] = np.power(0.1, np.log2((num*2) / args['train_num']) + 2)
-            else:
-                args['alpha'] = 0.1 * np.power(0.1, (num*2) / args['train_num'])
+
+        if num >= args.train_num:
+            args.alpha = np.power(0.1, np.log10(num/args.train_num)+2)
+       
 
         new_task_loader = get_new_task_loader(args, new_task_id, False, True)
 
         feature_extractor = FeatureExtractor_BCI2000(args).float()
-        sleep_classifier = SleepMLP_BCI2000(args).float()
+        mi_classifier = MIMLP_BCI2000(args).float()
         feature_encoder = TransformerEncoder_BCI2000(args).float()
 
         if not os.path.exists(PATH):
@@ -113,19 +104,19 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
                 torch.load(PATH))
             feature_encoder.load_state_dict(
                 torch.load(PATH))
-            sleep_classifier.load_state_dict(
+            mi_classifier.load_state_dict(
                 torch.load(PATH))
-            old_task_ans = evaluator((feature_extractor, feature_encoder, sleep_classifier), old_task_loader, args)
+            old_task_ans = evaluator((feature_extractor, feature_encoder, mi_classifier), old_task_loader, args)
 
             old_task_evaluator = Evaluator(old_task_ans[0], old_task_ans[1])
             old_task_acc, old_task_mf1 = old_task_evaluator.metric_acc(), old_task_evaluator.metric_mf1()
-            args['old_task_performance']['ACC'].append(old_task_acc)
-            args['old_task_performance']['MF1'].append(old_task_mf1)
+            args.old_task_performance['ACC'].append(old_task_acc)
+            args.old_task_performance['MF1'].append(old_task_mf1)
 
-            old_task_aaa = compute_aaa(args['old_task_performance']['ACC'])
-            old_task_forget = compute_forget(args['old_task_performance']['ACC'])
-            args['old_task_performance']['AAA'].append(old_task_aaa)
-            args['old_task_performance']['FR'].append(old_task_forget)
+            old_task_aaa = compute_aaa(args.old_task_performance['ACC'])
+            old_task_forget = compute_forget(args.old_task_performance['ACC'])
+            args.old_task_performance['AAA'].append(old_task_aaa)
+            args.old_task_performance['FR'].append(old_task_forget)
 
         else:
             """
@@ -133,9 +124,9 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
             """
             feature_extractor.load_state_dict(torch.load(PATH))
             feature_encoder.load_state_dict(torch.load(PATH))
-            sleep_classifier.load_state_dict(torch.load(PATH))
+            mi_classifier.load_state_dict(torch.load(PATH))
 
-        cur_blocks = (feature_extractor, feature_encoder, sleep_classifier)
+        cur_blocks = (feature_extractor, feature_encoder, mi_classifier)
         teacher_blocks = copy.deepcopy(cur_blocks)
         last_blocks = copy.deepcopy(cur_blocks)
         tmp_blocks, tmp_blocks_teacher = incremental_trainer(cur_blocks, teacher_blocks, args, new_task_loader, new_task_id, num)
@@ -149,23 +140,23 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         for key in state_encoder.keys():
             state_encoder[key] = state_encoder[key].to(torch.device("cpu"))
 
-        state_sleep = tmp_blocks[2].state_dict()
-        for key in state_sleep.keys():
-            state_sleep[key] = state_sleep[key].to(torch.device("cpu"))
+        state_mi = tmp_blocks[2].state_dict()
+        for key in state_mi.keys():
+            state_mi[key] = state_mi[key].to(torch.device("cpu"))
         torch.save(state_f, PATH)
         torch.save(state_encoder, PATH)
-        torch.save(state_sleep, PATH)
+        torch.save(state_mi, PATH)
 
         """Initial Model"""
         feature_extractor_initial = FeatureExtractor_BCI2000(args).float()
-        sleep_classifier_initial = SleepMLP_BCI2000(args).float()
+        mi_classifier_initial = MIMLP_BCI2000(args).float()
         feature_encoder_initial = TransformerEncoder_BCI2000(args).float()
 
         feature_extractor_initial.load_state_dict(
             torch.load(PATH))
         feature_encoder_initial.load_state_dict(
             torch.load(PATH))
-        sleep_classifier_initial.load_state_dict(
+        mi_classifier_initial.load_state_dict(
             torch.load(PATH))
 
         """Metric"""
@@ -185,14 +176,14 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
         new_task_before_acc, new_task_before_mf1 = new_before_evaluator.metric_acc(), new_before_evaluator.metric_mf1()
         new_task_after_acc, new_task_after_mf1 = new_after_evaluator.metric_acc(), new_after_evaluator.metric_mf1()
 
-        args['new_task_performance'][new_task_id]['ACC'] = [new_task_initial_acc, new_task_before_acc, new_task_after_acc]
-        args['new_task_performance'][new_task_id]['MF1'] = [new_task_initial_mf1, new_task_before_mf1, new_task_after_mf1]
+        args.new_task_performance[new_task_id]['ACC'] = [new_task_initial_acc, new_task_before_acc, new_task_after_acc]
+        args.new_task_performance[new_task_id]['MF1'] = [new_task_initial_mf1, new_task_before_mf1, new_task_after_mf1]
 
         print(f"=========New Task {new_task_id}=========")
-        print(" ACC Initial                    ", args['new_task_performance'][new_task_id]['ACC'][0], "\n",
-              "ACC Before                    ", args['new_task_performance'][new_task_id]['ACC'][1], "\n",
+        print(" ACC Initial                    ", args.new_task_performance[new_task_id]['ACC'][0], "\n",
+              "ACC Before                    ", args.new_task_performance[new_task_id]['ACC'][1], "\n",
               "ACC After Contrastive Learning ", new_after_teacher_evaluator.metric_acc(), "\n",
-              "ACC After Joint Training       ", args['new_task_performance'][new_task_id]['ACC'][2], "\n")
+              "ACC After Joint Training       ", args.new_task_performance[new_task_id]['ACC'][2], "\n")
 
         old_task_ans = evaluator(tmp_blocks, old_task_loader, args)
         old_task_teacher_ans = evaluator(tmp_blocks_teacher, old_task_loader, args)
@@ -202,35 +193,35 @@ def incremental_learning_contrastive_buffer_bci2000(old_task_loader, new_task_id
 
         old_task_acc = old_task_evaluator.metric_acc()
         old_task_mf1 = old_task_evaluator.metric_mf1()
-        args['old_task_performance']['ACC'].append(old_task_acc)
-        args['old_task_performance']['MF1'].append(old_task_mf1)
+        args.old_task_performance['ACC'].append(old_task_acc)
+        args.old_task_performance['MF1'].append(old_task_mf1)
 
-        old_task_aaa = compute_aaa(args['old_task_performance']['ACC'])
-        old_task_forget = compute_forget(args['old_task_performance']['ACC'])
-        args['old_task_performance']['AAA'].append(old_task_aaa)
-        args['old_task_performance']['FR'].append(old_task_forget)
+        old_task_aaa = compute_aaa(args.old_task_performance['ACC'])
+        old_task_forget = compute_forget(args.old_task_performance['ACC'])
+        args.old_task_performance['AAA'].append(old_task_aaa)
+        args.old_task_performance['FR'].append(old_task_forget)
 
         print(args["old_task_performance"])
         print("=========Old Task=========")
         if num ==1 :
-            print(" ACC Before                    ", args['old_task_performance']['ACC'][0], "\n",
+            print(" ACC Before                    ", args.old_task_performance['ACC'][0], "\n",
                   "ACC After Contrastive Learning ", old_task_evaluator_teacher.metric_acc(), "\n",
-                  "ACC After Joint Training       ", args['old_task_performance']['ACC'][-1], "\n",
-                  "MF1 Before                     ", args['old_task_performance']['MF1'][0], "\n",
+                  "ACC After Joint Training       ", args.old_task_performance['ACC'][-1], "\n",
+                  "MF1 Before                     ", args.old_task_performance['MF1'][0], "\n",
                   "MF1 After Contrastive Learning ", old_task_evaluator_teacher.metric_mf1(), "\n",
-                  "MF1 After Joint Training       ", args['old_task_performance']['MF1'][-1], "\n")
+                  "MF1 After Joint Training       ", args.old_task_performance['MF1'][-1], "\n")
         else:
-            print(" ACC Before                    ", args['old_task_performance']['ACC'][-2], "\n",
+            print(" ACC Before                    ", args.old_task_performance['ACC'][-2], "\n",
                   "ACC After Contrastive Learning ", old_task_evaluator_teacher.metric_acc(), "\n",
-                  "ACC After Joint Training       ", args['old_task_performance']['ACC'][-1], "\n",
-                  "MF1 Before                     ", args['old_task_performance']['MF1'][-2], "\n",
+                  "ACC After Joint Training       ", args.old_task_performance['ACC'][-1], "\n",
+                  "MF1 Before                     ", args.old_task_performance['MF1'][-2], "\n",
                   "MF1 After Contrastive Learning ", old_task_evaluator_teacher.metric_mf1(), "\n",
-                  "MF1 After Joint Training       ", args['old_task_performance']['MF1'][-1], "\n")
+                  "MF1 After Joint Training       ", args.old_task_performance['MF1'][-1], "\n")
 
         """If needs merge new individual's data to the buffer"""
-        if args['buffer_merge']:
+        if args.buffer_merge:
             buffer_single_merge(args, new_task_id, num, tmp_blocks)
-        print("Buffer_Length", len(args["train_path"][0]), len(args["train_path"][1]))
+        print("Buffer_Length", len(args.train_path[0]), len(args.train_path[1]))
         num += 1
 
 
