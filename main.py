@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from dataloader.data_loader import Builder
 from trainer.pretrainer import pretraining
 from trainer.trainer import trainer
-
+from trainer.trainer_bci2000 import 
 
 def get_path_loader(params):
     path = [i for i in range(1, 101) if i not in [8, 40]]
