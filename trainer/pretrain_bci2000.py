@@ -1,7 +1,7 @@
 # Time : 2023/11/13 12:52
 # Author : 小霸奔
 # FileName: pretrain.p
-from model.pretrain_net import FeatureExtractor_BCI2000, TransformerEncoder_BCI2000, SleepMLP_BCI2000
+from model.pretrain_net import FeatureExtractor_BCI2000, TransformerEncoder_BCI2000, MIMLP_BCI2000
 import torch.nn as nn
 import torch
 from sklearn.metrics import classification_report, f1_score, confusion_matrix
@@ -55,7 +55,7 @@ def train_block(train_dl, val_dl, args):
     # Build model network
 
     feature_extractor = FeatureExtractor_BCI2000(args).float().to(device)
-    sleep_classifier = SleepMLP_BCI2000(args).float().to(device)
+    mi_classifier = MIMLP_BCI2000(args).float().to(device)
     feature_encoder = TransformerEncoder_BCI2000(args).float().to(device)
 
     # loss function
@@ -63,7 +63,7 @@ def train_block(train_dl, val_dl, args):
 
     # optimizer
     optimizer_encoder = torch.optim.Adam(list(feature_extractor.parameters())
-                                         + list(sleep_classifier.parameters())
+                                         + list(mi_classifier.parameters())
                                          + list(feature_encoder.parameters()), lr=args["lr"],
                                          betas=(args.beta[0], args.beta[1]),
                                          weight_decay=args.weight_decay)
@@ -74,17 +74,14 @@ def train_block(train_dl, val_dl, args):
     for epoch in range(1, args["pretrain_epoch"] + 1):
         print(f"--------------------Epoch{epoch}---Pretrain-----------------------------")
         feature_extractor.train()
-        sleep_classifier.train()
+        mi_classifier.train()
         feature_encoder.train()
         running_loss = 0.0
         for batch_idx, data in enumerate(train_dl):
             x, label = data[0].to(device), data[1].to(device)
-            # epoch_size = model_param.EpochLengthFace  # batch, 32, 7500
             ff = feature_extractor(x)
             ff = feature_encoder(ff)
-            pred = sleep_classifier(ff)
-            # Compute Classification Loss
-            # print(pred.shape, label.shape)
+            pred = mi_classifier(ff)
             loss_classifier = classifier_criterion(pred, label.long())
 
             optimizer_encoder.zero_grad()
@@ -96,14 +93,14 @@ def train_block(train_dl, val_dl, args):
 
             running_loss += loss_classifier.item()
 
-            # if batch_idx % 10 == 9:  # 输出每次的平均loss
+            # if batch_idx % 10 == 9:  
             print('\n [%d,  %5d] total_loss: %.3f ' % (epoch, batch_idx + 1, running_loss))
             running_loss = 0.0
 
 
         if epoch % 1 == 0:
             print(f" -------------------Epoch{epoch}---Val------------------------------")
-            report = dev_block((feature_extractor, feature_encoder, sleep_classifier),
+            report = dev_block((feature_extractor, feature_encoder, mi_classifier),
                                val_dl, args, model_param)
             total_acc.append(report[0])
             total_f1.append(report[1])
@@ -123,7 +120,7 @@ def train_block(train_dl, val_dl, args):
 
 def dev_block(model, val_dl, args, model_param):
     """
-    :param model: (feature_extractor, att_encoder, sleep_classifier)
+    :param model: (feature_extractor, att_encoder, mi_classifier)
     :param val_dl: Val Set Dataloader
     :param args: Val parameters
     :param model_param: Model Parameters
