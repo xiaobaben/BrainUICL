@@ -84,6 +84,79 @@ class CPC(object):
         return loss.item(), (self.feature_extractor, self.feature_encoder, self.classifier)
 
 
+class CPC_BCI2000(object):
+    def __init__(self, blocks, args):
+        super(CPC_BCI2000, self).__init__()
+        self.args = args
+        self.feature_extractor = blocks[0]
+        self.feature_encoder = blocks[1]
+        self.classifier = blocks[2]
+        self.model_param = ModelConfig(args.dataset)
+
+        self.num_channels = self.model_param.EncoderParam.d_model
+        self.d_model = self.model_param.EncoderParam.d_model
+
+        self.timestep = 3
+        self.device = args.device
+        self.Wk = nn.ModuleList([nn.Sequential(nn.Linear(self.d_model, self.d_model*4),
+                                               nn.Dropout(0.1),
+                                               nn.GELU(),
+                                               nn.Linear(self.d_model*4, self.d_model)).to(self.device)
+                                 for _ in range(self.timestep)])
+
+        self.lsoftmax = nn.LogSoftmax(dim=1)
+        self.encoder = MultiHeadAttentionBlock(self.d_model,
+                                               self.model_param.EncoderParam.layer_num,
+                                               self.model_param.EncoderParam.drop,
+                                               self.model_param.EncoderParam.n_head).to(self.device)
+
+        self.optimizer = torch.optim.Adam([
+                                           {"params": list(self.feature_extractor.parameters())},
+                                           {"params": list(self.feature_encoder.parameters())},
+                                           {"params": list(self.encoder.parameters()), "lr": self.args.lr},
+                                           {"params": list(self.Wk.parameters()), "lr": self.args.lr}],
+                                          lr=self.args.contrastive_lr, betas=(self.args.beta[0],
+                                                                                 self.args.beta[1]),
+                                          weight_decay=self.args.weight_decay)
+
+    def update(self, x):
+        # ====== Data =====================
+        seq_len = 10
+        batch = x.shape[0]
+
+
+        # EEG + EOG
+        ff = self.feature_extractor(x)
+        ff = self.feature_encoder(ff)
+        t_samples = torch.randint(low=5, high=(seq_len - self.timestep), size=(1,)).long().to(self.device)
+        loss = 0
+        encode_samples = torch.empty((self.timestep, batch, self.num_channels)).float().to(self.device)
+
+        for i in np.arange(1, self.timestep + 1):
+            encode_samples[i - 1] = ff[:, t_samples + i, :].view(batch, self.num_channels)
+        forward_seq = ff[:, :t_samples + 1, :]
+
+        output = self.encoder(forward_seq)  # batch, 15, 128
+
+        c_t = output[:, t_samples, :].view(batch, -1)  # batch, 128  上下文特征
+
+        pred = torch.empty((self.timestep, batch, self.num_channels)).float().to(self.device)  # 5, batch, 128
+        for i in np.arange(0, self.timestep):
+            linear = self.Wk[i]
+            pred[i] = linear(c_t)  # batch, 128
+        for i in np.arange(0, self.timestep):
+            total = torch.mm(encode_samples[i], torch.transpose(pred[i], 0, 1))  # batch, 128   128, batch
+            loss += torch.sum(torch.diag(self.lsoftmax(total)))
+        loss /= -1. * batch * self.timestep
+
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        self.optimizer.step()
+
+        return loss.item(), (self.feature_extractor, self.feature_encoder, self.classifier)
+
+
 class BufferPseudoLabelFinetune(object):
     def __init__(self, blocks, teacher_blocks, args):
         super(BufferPseudoLabelFinetune, self).__init__()
