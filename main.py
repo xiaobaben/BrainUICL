@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from dataloader.data_loader import Builder
 from trainer.pretrainer import pretraining
 from trainer.trainer import trainer
-from trainer.trainer_bci2000 import 
+from trainer.trainer_bci2000 import trainer_bci2000
 
 def get_path_loader(params):
     path = [i for i in range(1, 101) if i not in [8, 40]]
@@ -120,7 +120,10 @@ def main():
     if params.is_pretrain:
         pretraining(train_loader, val_loader, params)
     else:
-        trainer(old_task_loader, new_task_idx, params, performance)
+        if param.dataset == 'BCI2000:
+            trainer_bci2000(old_task_loader, new_task_idx, params, performance)
+        else:
+            trainer(old_task_loader, new_task_idx, params, performance)
     analysis(performance)
 
 
