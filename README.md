@@ -9,8 +9,8 @@ _An Unsupervised Individual Continual Learning Framework for EEG Applications_
 
 ## 🔍 About
 We propose **BrainUICL**, a novel unsupervised individual continual learning framework, for continual EEG decoding on various clinical and BCI application.
-The camera-ready version of the paper will be available at https://openreview.net/forum?id=NPNUHgHF2w
-<div align="center">
+The camera-ready version of the paper will be available at [https://openreview.net/forum?id=NPNUHgHF2w](https://openreview.net/forum?id=6jjAYmppGQ&referrer=%5BAuthor%20Console%5D(%2Fgroup%3Fid%3DICLR.cc%2F2025%2FConference%2FAuthors%23your-submissions))
+<div align="left">
 <img src="figure/BrainUICL.png" style="width:100%;" />
 </div>
 
